@@ -2,82 +2,90 @@ const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 const axios = require("axios");
 const cheerio = require("cheerio");
 
-const SITE_URL = "https://ak.sv";
+const SITE_URL = "https://ak.sv"; // الرابط الأساسي الحالي
 
 const manifest = {
-    id: "org.aksv.pro",
-    version: "2.0.0",
-    name: "AK.SV Content",
-    description: "الأفلام والمسلسلات مباشرة من AK.SV بجودة MP4",
-    resources: ["catalog", "stream"],
+    id: "org.akwam.aymene",
+    version: "3.0.0",
+    name: "AKWAM Advanced",
+    description: "إضافة أكوام المطورة - مستوحاة من مستودع aymene69",
+    resources: ["catalog", "stream", "meta"],
     types: ["movie", "series"],
     catalogs: [
         {
             type: "movie",
-            id: "ak_latest",
-            name: "آخر الأفلام المضافة"
+            id: "ak_movies",
+            name: "أفلام أكوام"
+        },
+        {
+            type: "series",
+            id: "ak_series",
+            name: "مسلسلات أكوام"
         }
     ]
 };
 
 const builder = new addonBuilder(manifest);
 
-// 1. جلب قائمة الأفلام من الموقع
-builder.defineCatalogHandler(async () => {
+// دالة لجلب البيانات من الموقع بناءً على هيكلة المستودع الجاهز
+async function fetchAkwamPage(url) {
     try {
-        const { data } = await axios.get(`${SITE_URL}/main`, {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+        const { data } = await axios.get(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': SITE_URL
+            }
         });
-        const $ = cheerio.load(data);
-        let metas = [];
+        return cheerio.load(data);
+    } catch (e) {
+        return null;
+    }
+}
 
-        // استهداف العناصر التي تحتوي على الأفلام (تأكد من الـ Selector)
-        $("a[href*='/movie/'], .movie-item, .post").each((i, el) => {
-            const title = $(el).text().trim() || $(el).attr('title');
-            const pageUrl = $(el).attr("href");
-            const thumb = $(el).find("img").attr("src");
+builder.defineCatalogHandler(async ({ type }) => {
+    const targetUrl = type === "movie" ? `${SITE_URL}/movies` : `${SITE_URL}/series`;
+    const $ = await fetchAkwamPage(targetUrl);
+    if (!$) return { metas: [] };
 
-            if (title && pageUrl) {
-                metas.push({
-                    id: Buffer.from(pageUrl).toString('base64'),
-                    type: "movie",
-                    name: title,
-                    poster: thumb?.startsWith('http') ? thumb : `${SITE_URL}${thumb}`
+    let metas = [];
+    // استهداف الـ Class الصحيح المعتاد في موقع أكوام
+    $(".widget-box .col-lg-2, .movie-item").each((i, el) => {
+        const link = $(el).find("a").attr("href");
+        const title = $(el).find(".title").text().trim() || $(el).find("h2").text().trim();
+        const img = $(el).find("img").attr("src") || $(el).find("img").attr("data-src");
+
+        if (link && title) {
+            metas.push({
+                id: Buffer.from(link).toString('base64'),
+                type: type,
+                name: title,
+                poster: img?.startsWith('http') ? img : `${SITE_URL}${img}`
+            });
+        }
+    });
+    return { metas };
+});
+
+builder.defineStreamHandler(async ({ id }) => {
+    try {
+        const movieUrl = Buffer.from(id, 'base64').toString('ascii');
+        const $ = await fetchAkwamPage(movieUrl);
+        if (!$) return { streams: [] };
+
+        let streams = [];
+        // البحث عن روابط الـ MP4 أو أزرار التحميل كما في المستودع القديم
+        $("a[href*='download'], a[href*='.mp4'], .download-link").each((i, el) => {
+            const href = $(el).attr("href");
+            const quality = $(el).text().trim() || "Quality " + (i + 1);
+            if (href && href.includes(".mp4")) {
+                streams.push({
+                    title: `AKWAM - ${quality}`,
+                    url: href
                 });
             }
         });
 
-        // إزالة التكرار
-        const uniqueMetas = metas.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
-        return { metas: uniqueMetas };
-    } catch (e) {
-        return { metas: [] };
-    }
-});
-
-// 2. استخراج رابط الـ MP4 لتشغيله داخل ستريمو
-builder.defineStreamHandler(async ({ id }) => {
-    try {
-        const moviePageUrl = Buffer.from(id, 'base64').toString('ascii');
-        const fullUrl = moviePageUrl.startsWith('http') ? moviePageUrl : `${SITE_URL}${moviePageUrl}`;
-        
-        const { data } = await axios.get(fullUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-        
-        // البحث عن روابط MP4 داخل الصفحة
-        const mp4Matches = data.match(/https?:\/\/[^"']+\.mp4/g);
-
-        if (mp4Matches && mp4Matches.length > 0) {
-            return {
-                streams: mp4Matches.map((link, index) => ({
-                    title: `سيرفر مباشر ${index + 1} (MP4)`,
-                    url: link
-                }))
-            };
-        }
-        
-        return { streams: [] };
+        return { streams };
     } catch (e) {
         return { streams: [] };
     }
