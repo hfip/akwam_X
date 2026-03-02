@@ -1,13 +1,14 @@
-<meta name='viewport' content='width=device-width, initial-scale=1'/>{
-  "name": "ak-sv-addon",
+{
+  "name": "akwam-x-addon",
   "version": "1.0.0",
+  "description": "Stremio Addon for AK.SV",
   "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "stremio-addon-sdk": "^1.6.0",
     "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12"
-  },
-  "scripts": {
-    "start": "node index.js"
   }
 }
